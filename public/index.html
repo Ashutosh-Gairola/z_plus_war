@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no" />
+  <title>Micro Football</title>
+  <link rel="icon" href="data:," />
+  <link rel="stylesheet" href="style.css" />
+</head>
+
+<body>
+  <main class="app-shell">
+    <section id="loginPanel" class="panel">
+      <h1>Micro Football</h1>
+      <p>Enter your name and join the live match.</p>
+      <form id="loginForm">
+        <input id="nameInput" maxlength="18" placeholder="Your name" autocomplete="off" required />
+        <button type="submit">Play Now</button>
+      </form>
+      <small>Controls: WASD or Arrow Keys, Space to jump.</small>
+    </section>
+
+    <section id="gamePanel" class="panel hidden">
+      <header class="hud">
+        <div id="status">Connecting...</div>
+        <div class="score">
+          <span id="redScore">0</span>
+          <span>:</span>
+          <span id="blueScore">0</span>
+        </div>
+        <div id="ping" class="ping">Ping: -- ms</div>
+        <div id="timer">05:00</div>
+      </header>
+      <div class="game-stage">
+        <canvas id="gameCanvas" width="800" height="500" aria-label="Micro football game field"></canvas>
+        <div id="orientationOverlay" class="orientation-overlay hidden">
+          Rotate to landscape to play.
+        </div>
+        <div id="cooldownOverlay" class="cooldown-overlay hidden" aria-live="polite">
+          <div class="cooldown-card">
+            <h2>Cooldown</h2>
+            <p>Match paused. Next round starts soon.</p>
+            <div id="cooldownPlayerList" class="cooldown-player-list"></div>
+            <button id="voteSkipButton" class="vote-skip-button">Vote to Start (0/0)</button>
+          </div>
+        </div>
+        <div id="goalBanner" class="goal-banner hidden" aria-live="polite"></div>
+        <div id="mobileControls" class="mobile-controls hidden">
+          <div id="joystickBase" class="joystick-base">
+            <div id="joystickKnob" class="joystick-knob"></div>
+          </div>
+          <button id="jumpButton" class="jump-button" type="button">JUMP</button>
+        </div>
+      </div>
+      <footer class="footer-note">Close tab to leave match. Re-open and login to start fresh.</footer>
+    </section>
+  </main>
+
+  <script src="https://cdn.socket.io/4.8.1/socket.io.min.js"></script>
+  <script src="game.js"></script>
+</body>
+
+</html>

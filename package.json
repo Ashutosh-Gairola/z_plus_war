@@ -1,0 +1,28 @@
+{
+  "name": "micro-football",
+  "version": "1.0.0",
+  "description": "Browser-based multiplayer micro football game using Express and Socket.IO",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "check": "node --check server.js",
+    "test": "npm run check"
+  },
+  "keywords": [
+    "multiplayer",
+    "game",
+    "socket.io",
+    "football"
+  ],
+  "author": "Gigmos",
+  "license": "ISC",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^5.2.1",
+    "socket.io": "^4.8.3",
+    "three": "^0.162.0"
+  }
+}

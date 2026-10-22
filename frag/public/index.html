@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Frag Arena</title>
+  <link rel="icon" href="data:," />
+  <link rel="stylesheet" href="frag.css" />
+</head>
+
+<body>
+  <main class="app">
+    <section id="entryScreen" class="panel">
+      <h1>Frag Arena</h1>
+      <p>blocky battleground environment.</p>
+      <p id="entryMsg"></p>
+      <form id="joinForm">
+        <input id="nameInput" maxlength="18" placeholder="Enter player name" required />
+        <button type="submit">Continue</button>
+      </form>
+      <button id="lockButton" type="button" class="secondary hidden">Click To Lock Mouse</button>
+      <small>Controls: WASD move/drive, Space jump, Shift sprint, C/Ctrl crouch, F enter/exit car, V melee, Mouse aim, Left click fire, Right click aim, R reload, 1/2/3 switch guns.</small>
+    </section>
+    <section id="gameScreen" class="hidden">
+      <div id="damageOverlay" class="damage-overlay"></div>
+
+      <div id="hud" class="hud">
+        <span id="phase">Phase: Playing</span>
+        <span id="time">10:00</span>
+        <span id="health">HP: 100</span>
+        <span id="weapon">Weapon: Rifle</span>
+        <span id="ammo">Ammo: 30/30</span>
+        <span id="score">K/D: 0/0</span>
+        <span id="zone">Zone: 250m</span>
+        <span id="ping">Ping: -- ms</span>
+      </div>
+
+      <div id="killFeed" class="kill-feed"></div>
+      <div id="interactPrompt" class="interact-prompt hidden"></div>
+      <div id="recruitPrompt" class="interact-prompt hidden"></div>
+      <div id="crosshair" class="crosshair">+</div>
+      <div id="scopeOverlay" class="scope-overlay hidden"></div>
+
+      <div id="miniMap" class="minimap-container">
+        <canvas id="minimapCanvas" class="minimap-canvas" width="180" height="180"></canvas>
+      </div>
+
+      <div id="leaderboard" class="leaderboard hidden">
+        <h3>Leaderboard</h3>
+        <div id="leaderboardList" class="leaderboard-list"></div>
+      </div>
+
+      <div id="cooldownPanel" class="cooldown-panel hidden">
+        <h2>Cooldown</h2>
+        <p>Session break. Next match starts soon.</p>
+        <div class="cooldown-timer">
+          <span>Next match in:</span>
+          <div id="cooldownTimer" class="timer-display">3:00</div>
+        </div>
+        <div class="cooldown-content">
+          <h3>Final Standings</h3>
+          <div id="cooldownList" class="cooldown-list"></div>
+          <button id="voteSkipButton" class="vote-skip-button">Vote to Start (0/0)</button>
+        </div>
+      </div>
+
+      <div id="respawnNotice" class="respawn hidden"></div>
+
+      <canvas id="gameCanvas"></canvas>
+    </section>
+  </main>
+
+  <!-- Served locally (vendor/) so the game works on devices without CDN access
+       (LAN phones, blocked networks). Relative paths survive the /demo prefix. -->
+  <script src="vendor/socket.io.min.js"></script>
+  <script src="vendor/three.min.js"></script>
+  <script type="module" src="frag.js"></script>
+</body>
+
+</html>

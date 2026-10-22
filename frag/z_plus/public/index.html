@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Frag Z+ | Zombie Survival</title>
+  <link rel="icon" href="data:," />
+  <link rel="stylesheet" href="../frag.css" />
+  <style>
+    .zplus-hud span.night { color: #9db4ff; }
+    .zplus-hud span.day { color: #ffd97a; }
+
+    .wave-banner {
+      position: absolute;
+      top: 22%;
+      left: 50%;
+      transform: translateX(-50%);
+      font-size: 46px;
+      font-weight: 800;
+      letter-spacing: 6px;
+      color: #ff5148;
+      text-shadow: 0 0 18px rgba(255, 40, 30, 0.65), 0 2px 4px #000;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.4s ease;
+      font-family: inherit;
+      z-index: 40;
+      text-align: center;
+    }
+
+    .wave-banner.show { opacity: 1; }
+
+    .wave-banner small {
+      display: block;
+      font-size: 16px;
+      letter-spacing: 3px;
+      color: #ffb8b3;
+    }
+
+    .start-overlay {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 14px;
+      background: rgba(4, 8, 14, 0.82);
+      z-index: 60;
+      cursor: pointer;
+      text-align: center;
+    }
+
+    .start-overlay h1 {
+      color: #ff5148;
+      letter-spacing: 8px;
+      margin: 0;
+    }
+
+    .start-overlay p { color: #cfe0f0; max-width: 520px; }
+
+    .start-overlay .survivor { color: #7ddc8a; font-weight: 700; }
+
+    .night-vignette {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background: radial-gradient(ellipse at center, transparent 52%, rgba(2, 4, 10, 0.55) 100%);
+      opacity: 0;
+      transition: opacity 2s ease;
+      z-index: 8;
+    }
+
+    .zombie-counter {
+      position: absolute;
+      top: 64px;
+      left: 50%;
+      transform: translateX(-50%);
+      color: #ffb0a8;
+      font-size: 14px;
+      letter-spacing: 2px;
+      text-shadow: 0 1px 3px #000;
+      z-index: 30;
+    }
+
+    /* Left-side recruited-companion roster (health + live combat status). */
+    .companion-panel {
+      position: absolute;
+      top: 92px;
+      left: 14px;
+      width: 194px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      z-index: 28;
+      pointer-events: none;
+    }
+    .companion-card {
+      background: rgba(12, 16, 22, 0.62);
+      border: 1px solid rgba(255, 255, 255, 0.09);
+      border-left: 3px solid #8bd;
+      border-radius: 8px;
+      padding: 7px 9px;
+      color: #e9eef5;
+      backdrop-filter: blur(3px);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+    }
+    .companion-card .row { display: flex; justify-content: space-between; align-items: baseline; }
+    .companion-card .name { font-weight: 700; font-size: 12px; letter-spacing: 0.3px; }
+    .companion-card .status { font-size: 10px; letter-spacing: 0.5px; opacity: 0.92; }
+    .companion-card .status.warn { color: #ffcf6b; }
+    .companion-card .status.good { color: #7fe0a0; }
+    .companion-card .status.busy { color: #9db4ff; }
+    .companion-card .hpbar {
+      height: 5px;
+      border-radius: 3px;
+      background: rgba(255, 255, 255, 0.14);
+      margin-top: 5px;
+      overflow: hidden;
+    }
+    .companion-card .hpfill {
+      height: 100%;
+      border-radius: 3px;
+      background: linear-gradient(90deg, #57d98a, #9be15b);
+      transition: width 0.2s ease;
+    }
+    .companion-card.hurt .hpfill { background: linear-gradient(90deg, #ff6b5b, #ffb057); }
+  </style>
+</head>
+
+<body>
+  <main class="app">
+    <section id="gameScreen">
+      <div id="damageOverlay" class="damage-overlay"></div>
+      <div id="nightVignette" class="night-vignette"></div>
+
+      <div id="hud" class="hud zplus-hud">
+        <span id="wave">Wave: --</span>
+        <span id="cycle" class="day">Day</span>
+        <span id="health">HP: 100</span>
+        <span id="weapon">Weapon: Rifle</span>
+        <span id="ammo">Ammo: 30/30</span>
+        <span id="score">Score: 0</span>
+        <span id="kills">Kills: 0</span>
+        <span id="ping">Ping: -- ms</span>
+      </div>
+
+      <div id="companionPanel" class="companion-panel"></div>
+
+      <div id="zombieCounter" class="zombie-counter"></div>
+      <div id="waveBanner" class="wave-banner"></div>
+
+      <div id="killFeed" class="kill-feed"></div>
+      <div id="interactPrompt" class="interact-prompt hidden"></div>
+      <div id="recruitPrompt" class="interact-prompt hidden"></div>
+      <div id="crosshair" class="crosshair">+</div>
+      <div id="scopeOverlay" class="scope-overlay hidden"></div>
+
+      <div id="miniMap" class="minimap-container">
+        <canvas id="minimapCanvas" class="minimap-canvas" width="180" height="180"></canvas>
+      </div>
+
+      <div id="leaderboard" class="leaderboard hidden">
+        <h3>Survivors</h3>
+        <div id="leaderboardList" class="leaderboard-list"></div>
+      </div>
+
+      <div id="respawnNotice" class="respawn hidden"></div>
+
+      <div id="startOverlay" class="start-overlay">
+        <h1>Z+ SURVIVAL</h1>
+        <p>You are <span class="survivor" id="survivorName">...</span>.
+          The first wave hits one minute after arrival. They see you. They hear you.
+          Night doubles them.</p>
+        <p><b>Click to lock in.</b><br />
+          <small>WASD move · Shift sprint · Space jump · C crouch · E vehicle · V melee ·
+            R reload · 1/2/3 weapons · Right-click aim · F enter/exit car</small>
+        </p>
+      </div>
+
+      <canvas id="gameCanvas"></canvas>
+    </section>
+  </main>
+
+  <!-- Served from the frag static mount (../vendor) so the game works on
+       devices without CDN access (LAN phones, blocked networks). -->
+  <script src="../vendor/socket.io.min.js"></script>
+  <script src="../vendor/three.min.js"></script>
+  <script type="module" src="z_plus.js"></script>
+</body>
+
+</html>
