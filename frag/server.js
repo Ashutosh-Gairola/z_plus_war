@@ -2990,20 +2990,24 @@ function initFragMode(app, io, rootDir) {
   });
 
   // Frag routes: local (/frag) + prod-prefixed (/demo/frag)
-  app.use("/frag", express.static(path.join(rootDir, "frag", "public")));
-  app.use("/demo/frag", express.static(path.join(rootDir, "frag", "public")));
+  // redirect:false — express.static's own "/frag" -> "/frag/" redirect is
+  // absolute and lands outside the public /demo prefix (Caddy strips it).
+  app.use("/frag", express.static(path.join(rootDir, "frag", "public"), { redirect: false }));
+  app.use("/demo/frag", express.static(path.join(rootDir, "frag", "public"), { redirect: false }));
 
-  // Local route
-  app.get("/frag", (_req, res) => {
-    res.redirect("/frag/");
+  // Local route (relative redirect works behind the /demo prefix too)
+  app.get("/frag", (req, res, next) => {
+    if (req.path.endsWith("/")) return next();
+    res.redirect("frag/");
   });
   app.get("/frag/", (_req, res) => {
     res.sendFile(path.join(rootDir, "frag", "public", "index.html"));
   });
 
   // Prod-prefixed route
-  app.get("/demo/frag", (_req, res) => {
-    res.redirect("/demo/frag/");
+  app.get("/demo/frag", (req, res, next) => {
+    if (req.path.endsWith("/")) return next();
+    res.redirect("frag/");
   });
 
   app.get("/demo/frag/", (_req, res) => {

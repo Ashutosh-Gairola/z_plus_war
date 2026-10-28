@@ -14,7 +14,6 @@ import { AudioManager } from "./modules/audio-manager.js";
 import { interpState } from "./modules/interpolation.js";
 import { VehiclePredictor, applyVehiclePose } from "./modules/vehicle-prediction.js";
 import { LocalPredictor } from "./modules/local-prediction.js";
-import { TargetInfo } from "./modules/target-info.js";
 import { normalizeAngle } from "./modules/utils.js";
 import { isTouchClient } from "./modules/touch-controls.js";
 
@@ -47,7 +46,6 @@ class FragGame {
     try {
       this.renderer = new Renderer(canvas);
       this.predictor = new LocalPredictor();
-      this.targetInfo = new TargetInfo(document.getElementById("gameScreen"));
     } catch (err) {
       console.error("Renderer construction failed:", err);
     }
@@ -114,7 +112,6 @@ class FragGame {
         this.gameState.setWorldMeta(state.meta);
         this.predictor.setWorld(state.meta);
         if (state.meta.structure) this.predictor.applyStructure(state.meta.structure);
-        if (state.meta.structure) this.targetInfo.applyStructure(state.meta.structure);
       }
       this.gameState.pushState(state);
     };
@@ -131,7 +128,6 @@ class FragGame {
     this.socketManager.on("structure", (payload) => {
       if (this.renderer.structureView) this.renderer.applyStructure(payload);
       this.predictor.applyStructure(payload); // broken walls stop blocking my own movement too
-      this.targetInfo.applyStructure(payload); // health bar for whatever I aim at
     });
     this.socketManager.on("disconnect", () => {
       this.gameState.reset();
@@ -438,14 +434,6 @@ class FragGame {
         this.renderer.updateVehicles(state.vehicles || [], this.gameState.myId, deltaTime);
         this.renderer.updateRiders(state.players, state.vehicles || [], this.gameState.myId, this.gameState.worldMeta, deltaTime);
         this.renderer.setWildlifeThreats(state.players);
-        // Health of the wall / tree / vehicle under the crosshair.
-        this.targetInfo.update({
-          camera: this.renderer.camera,
-          meta: this.gameState.worldMeta,
-          state: this.gameState.getStateBuffer().at(-1) || state,
-          me,
-          weapon: this.weaponData(me?.weapon),
-        });
         this.renderer.updateNpcs(state.npcs || [], deltaTime, this.gameState.worldMeta);
         this.renderer.updateRecruitBeacon(state, this.gameState.myId, deltaTime);
         this.renderer.updateGroundWeapons(state.groundWeapons || [], deltaTime, this.gameState.worldMeta);

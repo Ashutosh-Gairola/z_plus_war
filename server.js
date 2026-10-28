@@ -489,14 +489,18 @@ app.get("/favicon.ico", (_req, res) => {
   res.status(204).end();
 });
 
+// Redirects are RELATIVE: in production Caddy strips the /demo prefix before
+// proxying (handle_path /demo/*), so an absolute "/micro" would send the
+// browser to https://host/micro — outside /demo, a 404. "micro/" resolves
+// against whatever the browser is on (/demo/ -> /demo/micro/).
 app.get("/", (_req, res) => {
-  res.redirect("/micro");
+  res.redirect("micro/");
 });
 
 // Football routes: local (/micro) + prod-prefixed (/demo/micro)
 app.get("/micro", (_req, res) => {
   if (!_req.path.endsWith("/")) {
-    res.redirect("/micro/");
+    res.redirect("micro/");
     return;
   }
   res.sendFile(path.join(__dirname, "public", "index.html"));
@@ -507,11 +511,11 @@ app.get("/micro/", (_req, res) => {
 app.use("/micro", express.static(path.join(__dirname, "public")));
 
 app.get("/demo", (_req, res) => {
-  res.redirect("/demo/micro");
+  res.redirect("demo/micro/");
 });
 app.get("/demo/micro", (_req, res) => {
   if (!_req.path.endsWith("/")) {
-    res.redirect("/demo/micro/");
+    res.redirect("micro/");
     return;
   }
   res.sendFile(path.join(__dirname, "public", "index.html"));

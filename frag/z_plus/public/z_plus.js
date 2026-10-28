@@ -15,7 +15,6 @@ import { interpState } from "../modules/interpolation.js";
 import { VehiclePredictor, applyVehiclePose } from "../modules/vehicle-prediction.js";
 import { LocalPredictor } from "../modules/local-prediction.js";
 import { recruitContext } from "../modules/recruit-client.js";
-import { TargetInfo } from "../modules/target-info.js";
 import { RiftFx } from "./rift-fx.js";
 import { BossFx } from "./boss-fx.js";
 import { BossMarkers, bossTargets } from "./boss-marker.js";
@@ -449,7 +448,6 @@ class ZPlusGame {
     const canvas = document.getElementById("gameCanvas");
     this.renderer = new Renderer(canvas);
     this.predictor = new LocalPredictor();
-    this.targetInfo = new TargetInfo(document.getElementById("gameScreen"));
     // Every 10th wave: the rift, the Undead Wyrm, mini-dragon companions.
     this.riftFx = new RiftFx({ renderer: this.renderer, audio: this.audio, root: document.getElementById("gameScreen") });
     // Waves 5, 15, 25...: champion bosses.
@@ -585,12 +583,14 @@ class ZPlusGame {
       if (!this.gameState.worldMeta && state.meta) {
         // Survival mode has no shrink zone at all.
         if (state.meta?.worldHalfSize) WORLD_SIZE = state.meta.worldHalfSize * 2;
+        // Boss + dragon models are compiled with the world (behind the load
+        // screen) so a boss arriving mid-game doesn't freeze the frame.
+        this.renderer.prewarmObjects = this.bossFx.prewarmModels().concat(this.riftFx.prewarmModels());
         this.renderer.buildWorld(state.meta, { zone: false });
         this.gameState.setWorldMeta(state.meta);
         this.predictor.setWorld(state.meta);
         if (state.meta.structure) {
           this.predictor.applyStructure(state.meta.structure);
-          this.targetInfo.applyStructure(state.meta.structure);
         }
       }
       this.gameState.pushState(state);
@@ -609,7 +609,6 @@ class ZPlusGame {
     this.socketManager.on("structure", (payload) => {
       if (this.renderer.structureView) this.renderer.applyStructure(payload);
       this.predictor.applyStructure(payload);
-      this.targetInfo.applyStructure(payload);
     });
     this.socketManager.on("connect", () => this.autoJoin());
     this.socketManager.on("disconnect", () => {
@@ -973,14 +972,6 @@ class ZPlusGame {
           (state.vehicleEvents || []).filter((e) => e.type === "treefall"),
         );
         this.renderer.updateStructures(deltaTime); // debris, leaning, collapses
-        // Health of the wall / vehicle under the crosshair.
-        this.targetInfo.update({
-          camera: this.renderer.camera,
-          meta: this.gameState.worldMeta,
-          state: this.gameState.getStateBuffer().at(-1) || state,
-          me,
-          weapon: this.weaponData(me?.weapon),
-        });
 
         this.renderer.updateCamera(state, this.gameState.myId, this.gameState, deltaTime);
         this.renderer.updateRemotePlayers(state.players, this.gameState.myId, deltaTime, this.gameState.worldMeta);

@@ -840,6 +840,14 @@ export class RiftFx {
     this.R.spawnDirtBurst?.(x, z, true);
   }
 
+  /** Dragon + hatchling models for shader precompilation. */
+  prewarmModels() {
+    return [buildDragon({ kind: "wyrm", detail: true }), buildDragon({ kind: "pet", scale: 0.17, detail: false })].map((m) => {
+      m.position.set(0, -500, 0);
+      return m;
+    });
+  }
+
   pixelScale() {
     const r = this.R.renderer;
     return (r.domElement.height || window.innerHeight) * 0.5;

@@ -131,6 +131,28 @@ function mergeTree(root) {
  * holder group: `visible` hides/shows the prop's triangles, setTint() darkens
  * them.
  */
+/**
+ * Mark only [start, start+count) vertices of an attribute for GPU upload.
+ * Uploading the whole merged building buffer for every broken panel was a
+ * big hitch during destruction; ranges touched in the same frame merge into
+ * one span (three uploads a single updateRange per attribute).
+ */
+function markRange(attr, start, count) {
+  const off = start * attr.itemSize;
+  const len = count * attr.itemSize;
+  const r = attr.updateRange;
+  // The renderer resets count to -1 after each upload: start a new span.
+  if (r.count === -1) {
+    r.offset = off;
+    r.count = len;
+  } else {
+    const end = Math.max(r.offset + r.count, off + len);
+    r.offset = Math.min(r.offset, off);
+    r.count = end - r.offset;
+  }
+  attr.needsUpdate = true;
+}
+
 class PropHandle {
   constructor(parts) {
     this.parts = parts; // [{ mesh, start, count }]
@@ -150,7 +172,7 @@ class PropHandle {
       const src = mesh.userData.basePositions;
       // Hidden = collapsed to a degenerate point (no triangles drawn).
       for (let i = start * 3; i < (start + count) * 3; i += 1) pos.array[i] = v ? src[i] : src[(start * 3) + (i % 3)];
-      pos.needsUpdate = true;
+      markRange(pos, start, count);
     }
   }
 
@@ -160,7 +182,7 @@ class PropHandle {
       if (!col) continue;
       const src = mesh.userData.baseColors;
       for (let i = start * 3; i < (start + count) * 3; i += 1) col.array[i] = src[i] * f;
-      col.needsUpdate = true;
+      markRange(col, start, count);
     }
   }
 

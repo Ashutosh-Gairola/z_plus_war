@@ -277,13 +277,10 @@ export class Renderer {
     });
     if (meta.structure) this.structureView.apply(meta.structure, { snap: true });
     this.wildlife = new Wildlife(this.scene, meta);
+    this.settleUntil = performance.now() + 9000; // quality switches that recompile only now
     // Compile every world shader now (behind the loading screen) instead of
     // hitching the first time each area / material comes into view.
-    try {
-      this.renderer.compile(this.scene, this.camera);
-    } catch (err) {
-      console.warn("Shader precompile skipped:", err);
-    }
+    this.precompile(this.prewarmObjects || []);
     this.cullTimer = 0;
   }
 
@@ -1955,21 +1952,30 @@ export class Renderer {
     p.frames = 0;
     p.since = now;
     const minPR = 0.6;
-    // Hysteresis: anything that recompiles shaders (shadows on/off) is a
-    // multi-second hitch, so it may switch off once and only comes back after
-    // a long stretch of high FPS — never ping-pong every few seconds.
+    // Anything that changes shader programs (shadows on/off, post-processing
+    // on/off) recompiles every material in the world: a freeze of a second or
+    // more. Those switches are only allowed while the game is still settling
+    // right after load; mid-game the ladder uses changes that cost no
+    // recompile (resolution, bloom, shadow-map refresh rate, grass, view
+    // distance).
+    const settling = now < (this.settleUntil || 0);
     p.good = fps > 57 ? (p.good || 0) + 1 : 0;
     if (fps < 45) {
       if (this.pixelRatio > minPR + 0.01) {
         this.setRenderScale(Math.max(minPR, this.pixelRatio * 0.85));
-      } else if (this.sun && this.sun.castShadow) {
-        this.sun.castShadow = false; // one-time shader rebuild, then no shadow pass
-        this.shadowDrops = (this.shadowDrops || 0) + 1;
-      } else if (this.post && this.post.enabled) {
-        // Post-processing off for good (re-enabling would recompile everything).
+      } else if (this.post && this.post.enabled && this.post.bloomOn) {
+        this.post.bloomOn = false; // bloom passes off (no recompile)
+      } else if (this.renderer.shadowMap.autoUpdate && this.sun && this.sun.castShadow) {
+        this.shadowEvery = 3; // re-render the shadow map every 3rd frame only
+        this.renderer.shadowMap.autoUpdate = false;
+      } else if (settling && this.post && this.post.enabled) {
         this.post.setEnabled(false);
+        this.needsRecompile = true;
+      } else if (settling && this.sun && this.sun.castShadow) {
+        this.sun.castShadow = false;
+        this.needsRecompile = true;
       } else if (this.grassField && !this.grassField.off) {
-        this.grassField.off = true; // dense blades are the next biggest cost
+        this.grassField.off = true;
       } else if (this.camera && this.camera.far > 300) {
         this.camera.far = 300;
         this.camera.updateProjectionMatrix();
@@ -1981,11 +1987,33 @@ export class Renderer {
       } else if (this.pixelRatio < this.maxPixelRatio - 0.01 && p.good >= 3) {
         // (resizing reallocates the frame buffers: only after ~4.5s of headroom)
         this.setRenderScale(Math.min(this.maxPixelRatio, this.pixelRatio * 1.1));
-      } else if (this.sun && !this.sun.castShadow && this.shadowsWanted && (this.shadowDrops || 0) < 2 && p.good >= 8) {
-        // ~12s of solid FPS at full resolution: try shadows again (max twice).
-        this.sun.castShadow = true;
+      } else if (!this.renderer.shadowMap.autoUpdate && p.good >= 6) {
+        this.renderer.shadowMap.autoUpdate = true;
+      } else if (this.post && this.post.enabled && !this.post.bloomOn && p.good >= 8) {
+        this.post.bloomOn = true;
       }
     }
+  }
+
+  /**
+   * Compile every shader the scene uses now (call behind a loading screen).
+   * extra: objects to compile too (e.g. boss models not in play yet).
+   */
+  precompile(extra = []) {
+    for (const o of extra) this.scene.add(o);
+    try {
+      // Compile for the target frames actually render into: with post-FX on
+      // that's the HDR target (linear output), not the screen (sRGB). Compiling
+      // against the screen produced programs the game never used, and every
+      // material compiled again on the first real frame.
+      if (this.post && this.post.enabled) this.post.begin();
+      this.renderer.compile(this.scene, this.camera);
+    } catch (err) {
+      console.warn("precompile skipped:", err);
+    } finally {
+      this.renderer.setRenderTarget(null);
+    }
+    for (const o of extra) this.scene.remove(o);
   }
 
   setRenderScale(pr) {
@@ -2015,6 +2043,17 @@ export class Renderer {
     }
 
     if (this.grassField) this.grassField.update(this.camera);
+    // Throttled shadows (quality ladder): refresh the shadow map every Nth frame.
+    if (!this.renderer.shadowMap.autoUpdate) {
+      this.shadowFrame = ((this.shadowFrame || 0) + 1) % (this.shadowEvery || 3);
+      if (this.shadowFrame === 0) this.renderer.shadowMap.needsUpdate = true;
+    }
+    // A settle-window quality switch changed the shader set: rebuild it once,
+    // right away, instead of piecemeal as objects come into view.
+    if (this.needsRecompile) {
+      this.needsRecompile = false;
+      this.precompile(this.prewarmObjects || []);
+    }
 
     const usePost = this.post && this.post.enabled;
     if (usePost) {

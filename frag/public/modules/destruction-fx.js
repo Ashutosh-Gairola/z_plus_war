@@ -10,12 +10,132 @@
  * apply() takes the server's structure payload; update() runs every frame.
  */
 
-const DEBRIS_CAP = 520;
-const DEBRIS_LIFE = 45; // seconds settled chunks stay before fading
+const DEBRIS_LIFE = 25; // seconds settled chunks stay before fading
 const COLLAPSE_SECONDS = 3.4;
 const BOX = new THREE.BoxGeometry(1, 1, 1);
 const DUST_GEO = new THREE.SphereGeometry(1, 8, 6);
 const CHUNK_GEO = new THREE.IcosahedronGeometry(1, 0);
+
+// ---------------------------------------------------------------------------
+// Pooled debris + dust. Every chunk used to be its own mesh (and every dust
+// puff its own mesh + material): heavy destruction put hundreds of extra
+// draw calls (doubled by the shadow pass) on screen and the game crawled.
+// Now all debris renders through two InstancedMeshes and all dust through one
+// Points cloud — a handful of draw calls no matter how much breaks.
+// ---------------------------------------------------------------------------
+
+const DEBRIS_SLOTS = 360; // per shape
+const DUST_SLOTS = 700;
+const _dm = new THREE.Matrix4();
+const _dq = new THREE.Quaternion();
+const _de = new THREE.Euler();
+const _zero = new THREE.Matrix4().makeScale(0, 0, 0);
+
+class DebrisPool {
+  constructor(scene) {
+    const mat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9, metalness: 0.02, flatShading: true });
+    this.meshes = [BOX, CHUNK_GEO].map((geo) => {
+      const m = new THREE.InstancedMesh(geo, mat, DEBRIS_SLOTS);
+      m.castShadow = true;
+      m.receiveShadow = true;
+      m.frustumCulled = false;
+      m.userData.dynamic = true;
+      for (let i = 0; i < DEBRIS_SLOTS; i += 1) {
+        m.setMatrixAt(i, _zero);
+        m.setColorAt(i, new THREE.Color(0x888888));
+      }
+      m.count = DEBRIS_SLOTS;
+      scene.add(m);
+      return m;
+    });
+    this.free = [Array.from({ length: DEBRIS_SLOTS }, (_, i) => DEBRIS_SLOTS - 1 - i), Array.from({ length: DEBRIS_SLOTS }, (_, i) => DEBRIS_SLOTS - 1 - i)];
+    this.dirty = [false, false];
+  }
+
+  /** Take a slot (null when full — the caller recycles the oldest). */
+  take(shape, color) {
+    const slot = this.free[shape].pop();
+    if (slot === undefined) return null;
+    this.meshes[shape].setColorAt(slot, color);
+    this.meshes[shape].instanceColor.needsUpdate = true;
+    return slot;
+  }
+
+  release(shape, slot) {
+    this.meshes[shape].setMatrixAt(slot, _zero);
+    this.free[shape].push(slot);
+    this.dirty[shape] = true;
+  }
+
+  write(d) {
+    _de.set(d.rot.x, d.rot.y, d.rot.z);
+    _dq.setFromEuler(_de);
+    _dm.compose(d.pos, _dq, d.scale);
+    this.meshes[d.shape].setMatrixAt(d.slot, _dm);
+    this.dirty[d.shape] = true;
+  }
+
+  flush() {
+    for (let k = 0; k < 2; k += 1) {
+      if (!this.dirty[k]) continue;
+      this.meshes[k].instanceMatrix.needsUpdate = true;
+      this.dirty[k] = false;
+    }
+  }
+}
+
+class DustCloud {
+  constructor(scene) {
+    const g = new THREE.BufferGeometry();
+    this.pos = new Float32Array(DUST_SLOTS * 3);
+    this.size = new Float32Array(DUST_SLOTS);
+    this.alpha = new Float32Array(DUST_SLOTS);
+    this.col = new Float32Array(DUST_SLOTS * 3);
+    g.setAttribute("position", new THREE.BufferAttribute(this.pos, 3).setUsage(THREE.DynamicDrawUsage));
+    g.setAttribute("aSize", new THREE.BufferAttribute(this.size, 1).setUsage(THREE.DynamicDrawUsage));
+    g.setAttribute("aAlpha", new THREE.BufferAttribute(this.alpha, 1).setUsage(THREE.DynamicDrawUsage));
+    g.setAttribute("aColor", new THREE.BufferAttribute(this.col, 3).setUsage(THREE.DynamicDrawUsage));
+    this.geo = g;
+    this.uniforms = { scale: { value: 500 } };
+    this.points = new THREE.Points(
+      g,
+      new THREE.ShaderMaterial({
+        uniforms: this.uniforms,
+        transparent: true,
+        depthWrite: false,
+        vertexShader: `
+          attribute float aSize; attribute float aAlpha; attribute vec3 aColor;
+          uniform float scale; varying float vA; varying vec3 vC;
+          void main() {
+            vA = aAlpha; vC = aColor;
+            vec4 mv = modelViewMatrix * vec4(position, 1.0);
+            gl_PointSize = aSize * scale / max(0.5, -mv.z);
+            gl_Position = projectionMatrix * mv;
+          }`,
+        fragmentShader: `
+          varying float vA; varying vec3 vC;
+          void main() {
+            if (vA <= 0.0) discard;
+            float d = length(gl_PointCoord - 0.5);
+            float a = (1.0 - smoothstep(0.2, 0.5, d)) * vA;
+            gl_FragColor = vec4(vC, a);
+            #include <encodings_fragment>
+          }`,
+      }),
+    );
+    this.points.frustumCulled = false;
+    this.points.userData.dynamic = true;
+    scene.add(this.points);
+    this.cursor = 0;
+  }
+
+  /** Reuse the next slot (oldest dust gets overwritten when full). */
+  slot() {
+    const i = this.cursor;
+    this.cursor = (this.cursor + 1) % DUST_SLOTS;
+    return i;
+  }
+}
 
 const easeIn = (t) => t * t;
 const easeOut = (t) => 1 - (1 - t) * (1 - t);
@@ -37,6 +157,8 @@ export class StructureView {
     this.debris = [];
     this.dust = [];
     this.matCache = new Map();
+    this.debrisPool = new DebrisPool(scene);
+    this.dustCloud = new DustCloud(scene);
   }
 
   get props() {
@@ -154,8 +276,9 @@ export class StructureView {
     }
     for (const [, m] of this.rubble) this.scene.remove(m);
     this.rubble.clear();
-    for (const d of this.debris) this.scene.remove(d.mesh);
+    for (const d of this.debris) this.debrisPool.release(d.shape, d.slot);
     this.debris = [];
+    this.debrisPool.flush();
     this.collapsing = [];
     this.knownBroken.clear();
     this.buildings.clear();
@@ -183,60 +306,71 @@ export class StructureView {
     const ol = Math.hypot(ox, oz) || 1;
     ox /= ol;
     oz /= ol;
+    const base = new THREE.Color(def.color || 0x8a8378);
+    const c = new THREE.Color();
     for (let i = 0; i < count; i += 1) {
       const size = minSize + Math.random() * (maxSize - minSize);
-      const mesh = new THREE.Mesh(
-        Math.random() < 0.6 ? BOX : CHUNK_GEO,
-        this.mat(shade(def.color || 0x8a8378, 0.7 + Math.random() * 0.35).getHex()),
-      );
-      mesh.scale.set(size * (0.6 + Math.random()), size * (0.5 + Math.random() * 0.6), size * (0.6 + Math.random()));
-      mesh.position.set(
-        def.x + (Math.random() - 0.5) * def.sx,
-        (def.py || 0) + Math.random() * def.sy,
-        def.z + (Math.random() - 0.5) * def.sz,
-      );
-      mesh.castShadow = true;
-      this.scene.add(mesh);
+      const shape = Math.random() < 0.6 ? 0 : 1;
       const speed = 2 + Math.random() * 4;
-      this.addDebris(mesh, new THREE.Vector3(
-        ox * speed + (Math.random() - 0.5) * 3,
-        1 + Math.random() * 3,
-        oz * speed + (Math.random() - 0.5) * 3,
-      ));
+      this.addDebris(
+        {
+          shape,
+          color: c.copy(base).multiplyScalar(0.7 + Math.random() * 0.35),
+          pos: new THREE.Vector3(def.x + (Math.random() - 0.5) * def.sx, (def.py || 0) + Math.random() * def.sy, def.z + (Math.random() - 0.5) * def.sz),
+          scale: new THREE.Vector3(size * (0.6 + Math.random()), size * (0.5 + Math.random() * 0.6), size * (0.6 + Math.random())),
+        },
+        new THREE.Vector3(ox * speed + (Math.random() - 0.5) * 3, 1 + Math.random() * 3, oz * speed + (Math.random() - 0.5) * 3),
+      );
     }
   }
 
-  addDebris(mesh, vel) {
-    this.debris.push({
-      mesh,
+  addDebris(chunk, vel) {
+    let slot = this.debrisPool.take(chunk.shape, chunk.color);
+    if (slot === null) {
+      // Pool full: recycle the oldest chunk of this shape.
+      const k = this.debris.findIndex((d) => d.shape === chunk.shape);
+      if (k < 0) return;
+      const old = this.debris.splice(k, 1)[0];
+      this.debrisPool.release(old.shape, old.slot);
+      slot = this.debrisPool.take(chunk.shape, chunk.color);
+      if (slot === null) return;
+    }
+    const d = {
+      shape: chunk.shape,
+      slot,
+      pos: chunk.pos,
+      scale: chunk.scale,
+      rot: new THREE.Vector3(Math.random() * 6, Math.random() * 6, Math.random() * 6),
       vel,
       spin: new THREE.Vector3((Math.random() - 0.5) * 8, (Math.random() - 0.5) * 8, (Math.random() - 0.5) * 8),
       settled: false,
       age: 0,
-    });
-    if (this.debris.length > DEBRIS_CAP) {
-      const old = this.debris.shift();
-      this.scene.remove(old.mesh);
-    }
+    };
+    this.debris.push(d);
+    this.debrisPool.write(d);
   }
 
   dustBurst(x, y, z, spread, count, color = 0xa89f90, size = 1) {
+    const c = new THREE.Color(color);
+    const D = this.dustCloud;
     for (let i = 0; i < count; i += 1) {
-      const m = new THREE.Mesh(
-        DUST_GEO,
-        new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.5, depthWrite: false }),
-      );
       const a = Math.random() * Math.PI * 2;
       const r = Math.random() * spread;
-      m.position.set(x + Math.cos(a) * r, y + Math.random() * 1.2, z + Math.sin(a) * r);
-      m.scale.setScalar((0.6 + Math.random() * 0.8) * size);
-      this.scene.add(m);
+      const slot = D.slot();
+      // Drop whatever older puff used this slot.
+      const prev = this.dust.findIndex((p) => p.slot === slot);
+      if (prev >= 0) this.dust.splice(prev, 1);
+      D.col[slot * 3] = c.r;
+      D.col[slot * 3 + 1] = c.g;
+      D.col[slot * 3 + 2] = c.b;
       this.dust.push({
-        mesh: m,
+        slot,
+        pos: new THREE.Vector3(x + Math.cos(a) * r, y + Math.random() * 1.2, z + Math.sin(a) * r),
+        size: (0.6 + Math.random() * 0.8) * size * 2,
         life: 0,
         max: 2.5 + Math.random() * 2,
         vel: new THREE.Vector3(Math.cos(a) * (1 + Math.random() * 2), 0.6 + Math.random() * 1.2, Math.sin(a) * (1 + Math.random() * 2)),
-        grow: (1.2 + Math.random()) * size,
+        grow: (1.2 + Math.random()) * size * 2,
       });
     }
   }
@@ -388,13 +522,11 @@ export class StructureView {
       d.age += dt;
       if (!d.settled) {
         d.vel.y -= 18 * dt;
-        d.mesh.position.addScaledVector(d.vel, dt);
-        d.mesh.rotation.x += d.spin.x * dt;
-        d.mesh.rotation.y += d.spin.y * dt;
-        d.mesh.rotation.z += d.spin.z * dt;
-        const floor = d.mesh.scale.y * 0.5;
-        if (d.mesh.position.y <= floor) {
-          d.mesh.position.y = floor;
+        d.pos.addScaledVector(d.vel, dt);
+        d.rot.addScaledVector(d.spin, dt);
+        const floor = d.scale.y * 0.5;
+        if (d.pos.y <= floor) {
+          d.pos.y = floor;
           if (Math.abs(d.vel.y) < 1.5) {
             d.settled = true; // comes to rest and stays as rubble
           } else {
@@ -404,28 +536,37 @@ export class StructureView {
             d.spin.multiplyScalar(0.5);
           }
         }
+        this.debrisPool.write(d);
       } else if (d.age > DEBRIS_LIFE) {
         const k = 1 - Math.min(1, (d.age - DEBRIS_LIFE) / 2);
-        d.mesh.scale.multiplyScalar(k > 0 ? 0.97 : 0);
+        d.scale.multiplyScalar(k > 0 ? 0.97 : 0);
         if (k <= 0) {
-          this.scene.remove(d.mesh);
+          this.debrisPool.release(d.shape, d.slot);
           this.debris.splice(i, 1);
-        }
+        } else this.debrisPool.write(d);
       }
     }
+    this.debrisPool.flush();
 
+    const D = this.dustCloud;
     for (let i = this.dust.length - 1; i >= 0; i -= 1) {
       const p = this.dust[i];
       p.life += dt;
-      p.mesh.position.addScaledVector(p.vel, dt);
+      p.pos.addScaledVector(p.vel, dt);
       p.vel.multiplyScalar(Math.exp(-dt * 1.2));
-      p.mesh.scale.addScalar(p.grow * dt);
-      p.mesh.material.opacity = 0.5 * (1 - easeOut(Math.min(1, p.life / p.max)));
+      p.size += p.grow * dt;
+      const k = p.slot;
+      D.pos[k * 3] = p.pos.x;
+      D.pos[k * 3 + 1] = p.pos.y;
+      D.pos[k * 3 + 2] = p.pos.z;
+      D.size[k] = p.size;
+      D.alpha[k] = 0.5 * (1 - easeOut(Math.min(1, p.life / p.max)));
       if (p.life >= p.max) {
-        this.scene.remove(p.mesh);
-        p.mesh.material.dispose();
+        D.alpha[k] = 0;
         this.dust.splice(i, 1);
       }
     }
+    D.uniforms.scale.value = (window.innerHeight || 600) * 0.5;
+    for (const key of ["position", "aSize", "aAlpha", "aColor"]) D.geo.attributes[key].needsUpdate = true;
   }
 }

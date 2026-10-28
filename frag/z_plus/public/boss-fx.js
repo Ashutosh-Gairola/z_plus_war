@@ -10,6 +10,7 @@
  */
 
 import { FireParticles, Shockwaves, PARTICLE_PALETTES } from "./rift-fx.js";
+import { buildChampion, animateCloth, animateUndead } from "./boss-models.js";
 
 const _v = new THREE.Vector3();
 const _e = new THREE.Euler();
@@ -102,234 +103,8 @@ const STYLE = {
 // Model
 // ---------------------------------------------------------------------------
 
-/** Champion model at height 1 (scale the group by H). Faces -Z. */
-export function buildChampion(kind) {
-  const S = STYLE[kind];
-  const bulk = S.bulk;
-  const M = {
-    armor: std(S.armor, 0.5, 0.55),
-    cloth: std(S.cloth, 0.9, 0.0, { side: THREE.DoubleSide }),
-    skin: std(S.skin, 0.8, 0.0),
-    metal: std(S.metal, 0.35, 0.8),
-    accent: glow(S.accent, 2.2),
-    dark: std(0x141210, 0.8, 0.2),
-  };
-  const root = new THREE.Group();
-  const body = new THREE.Group(); // everything that moves with the character
-  root.add(body);
-
-  const hips = new THREE.Group();
-  hips.position.y = 0.5;
-  body.add(hips);
-  hips.add(mesh(new THREE.BoxGeometry(0.22 * bulk, 0.11, 0.14 * bulk), M.armor, 0, 0, 0));
-
-  const torso = new THREE.Group();
-  torso.position.y = 0.04;
-  hips.add(torso);
-  const chestGeo = new THREE.CylinderGeometry(0.15 * bulk, 0.1 * bulk, 0.28, 8);
-  chestGeo.translate(0, 0.14, 0);
-  torso.add(mesh(chestGeo, M.armor));
-  torso.add(mesh(new THREE.BoxGeometry(0.28 * bulk, 0.14, 0.17 * bulk), M.metal, 0, 0.21, 0)); // breastplate
-  torso.add(mesh(new THREE.BoxGeometry(0.2 * bulk, 0.06, 0.15 * bulk), M.armor, 0, 0.08, 0)); // belt / abdomen
-
-  const neck = new THREE.Group();
-  neck.position.y = 0.3;
-  torso.add(neck);
-  const head = new THREE.Group();
-  head.position.y = 0.06;
-  neck.add(head);
-  head.add(mesh(new THREE.SphereGeometry(0.062, 10, 8), M.skin, 0, 0.0, 0));
-
-  // Arms.
-  const arms = [];
-  for (const side of [-1, 1]) {
-    const sh = new THREE.Group();
-    sh.position.set(side * 0.18 * bulk, 0.25, 0);
-    torso.add(sh);
-    const pauldron = mesh(new THREE.SphereGeometry(0.08 * bulk, 8, 6, 0, Math.PI * 2, 0, Math.PI * 0.6), M.metal, 0, 0.02, 0);
-    pauldron.scale.set(1.15, 0.9, 1.1);
-    sh.add(pauldron);
-    sh.add(limb(0.17, 0.058 * bulk, 0.048 * bulk, M.armor));
-    const el = new THREE.Group();
-    el.position.y = -0.17;
-    sh.add(el);
-    el.add(limb(0.16, 0.05 * bulk, 0.042 * bulk, M.armor));
-    el.add(mesh(new THREE.CylinderGeometry(0.055 * bulk, 0.05 * bulk, 0.07, 7), M.metal, 0, -0.11, 0)); // gauntlet
-    const hand = new THREE.Group();
-    hand.position.y = -0.16;
-    el.add(hand);
-    hand.add(mesh(new THREE.BoxGeometry(0.06, 0.07, 0.06), M.dark, 0, -0.02, 0));
-    arms.push({ sh, el, hand, side });
-  }
-  // Legs.
-  const legs = [];
-  for (const side of [-1, 1]) {
-    const hip = new THREE.Group();
-    hip.position.set(side * 0.075 * bulk, -0.03, 0);
-    hips.add(hip);
-    hip.add(limb(0.24, 0.075 * bulk, 0.058 * bulk, M.armor));
-    const knee = new THREE.Group();
-    knee.position.y = -0.24;
-    hip.add(knee);
-    knee.add(mesh(new THREE.SphereGeometry(0.055 * bulk, 7, 5), M.metal, 0, 0, -0.01)); // knee guard
-    knee.add(limb(0.22, 0.058 * bulk, 0.048 * bulk, M.armor));
-    const foot = new THREE.Group();
-    foot.position.y = -0.22;
-    knee.add(foot);
-    foot.add(mesh(new THREE.BoxGeometry(0.08, 0.045, 0.14), M.dark, 0, -0.01, -0.03));
-    legs.push({ hip, knee, foot, side });
-  }
-  // Cloak / skirt.
-  const skirt = mesh(new THREE.ConeGeometry(0.19 * bulk, 0.32, 12, 1, true), M.cloth, 0, -0.12, 0);
-  hips.add(skirt);
-  const cape = mesh(new THREE.PlaneGeometry(0.32 * bulk, 0.55, 1, 4), M.cloth, 0, 0.0, 0.08 * bulk);
-  cape.geometry.translate(0, -0.2, 0);
-  cape.position.set(0, 0.29, 0.1 * bulk);
-  torso.add(cape);
-
-  const R = { root, body, hips, torso, neck, head, arms, legs, cape, phase: 0, swingT: 99, swingKind: null, extras: {}, kind };
-  const [armL, armR] = arms;
-  const props = {};
-
-  switch (kind) {
-    case "scarlet": {
-      // Winged golden helm, prosthetic golden arm, katana, red flowing cloth.
-      head.add(mesh(new THREE.SphereGeometry(0.055, 10, 8, 0, Math.PI * 2, 0, Math.PI * 0.6), M.metal, 0, 0.005, 0));
-      for (const s of [-1, 1]) {
-        const wing = mesh(new THREE.PlaneGeometry(0.12, 0.05), M.metal, s * 0.07, 0.04, 0.02);
-        wing.rotation.set(0, s * 0.6, s * 0.7);
-        head.add(wing);
-      }
-      armL.el.children[0].material = M.metal;
-      props.weapon = blade(0.55, 0.02, 0.045, std(0xe8e8f0, 0.2, 0.9), glow(0xffd0c0, 1.2));
-      armR.hand.add(props.weapon);
-      // Phase 2: scarlet wings of rot (hidden until then).
-      props.wings = new THREE.Group();
-      for (const s of [-1, 1]) {
-        const w = mesh(new THREE.PlaneGeometry(0.35, 0.28), glow(0xff3a1a, 1.4), s * 0.2, 0.15, 0.1);
-        w.material.side = THREE.DoubleSide;
-        w.material.transparent = true;
-        w.material.opacity = 0.75;
-        w.rotation.set(0.2, s * 0.5, s * 0.3);
-        props.wings.add(w);
-      }
-      props.wings.position.y = 0.2;
-      props.wings.visible = false;
-      torso.add(props.wings);
-      break;
-    }
-    case "titan": {
-      // Red lion mane, twin greatswords, riding a comically small horse.
-      for (let i = 0; i < 14; i += 1) {
-        const a = (i / 14) * Math.PI * 2;
-        const m = mesh(new THREE.IcosahedronGeometry(0.035, 0), std(0xb8341c, 0.9, 0), Math.cos(a) * 0.055, 0.02 + Math.sin(a * 2) * 0.01, Math.sin(a) * 0.05 + 0.02);
-        head.add(m);
-      }
-      head.add(mesh(new THREE.BoxGeometry(0.07, 0.06, 0.07), M.metal, 0, -0.005, -0.01)); // helm
-      props.weaponR = blade(0.46, 0.075, 0.018, std(0x8a8070, 0.4, 0.7), glow(0xb07aff, 0.9));
-      props.weaponL = blade(0.46, 0.075, 0.018, std(0x8a8070, 0.4, 0.7), glow(0xb07aff, 0.9));
-      armR.hand.add(props.weaponR);
-      armL.hand.add(props.weaponL);
-      // The horse.
-      const horse = new THREE.Group();
-      const hc = std(0x4a3a2a, 0.9, 0);
-      horse.add(mesh(new THREE.BoxGeometry(0.1, 0.1, 0.3), hc, 0, 0.27, 0));
-      const hneck = mesh(new THREE.BoxGeometry(0.06, 0.14, 0.06), hc, 0, 0.34, -0.16);
-      hneck.rotation.x = -0.6;
-      horse.add(hneck);
-      horse.add(mesh(new THREE.BoxGeometry(0.05, 0.05, 0.1), hc, 0, 0.4, -0.23));
-      props.horseLegs = [];
-      for (const [x, z] of [[-0.04, -0.11], [0.04, -0.11], [-0.04, 0.11], [0.04, 0.11]]) {
-        const lg = new THREE.Group();
-        lg.position.set(x, 0.23, z);
-        lg.add(limb(0.23, 0.018, 0.014, hc, 5));
-        horse.add(lg);
-        props.horseLegs.push(lg);
-      }
-      root.add(horse);
-      props.horse = horse;
-      body.position.y = 0.0;
-      R.mounted = true;
-      break;
-    }
-    case "omen": {
-      // Hood, long white hair, horns; cane; conjured golden weapons.
-      head.add(mesh(new THREE.ConeGeometry(0.075, 0.14, 8, 1, true), M.cloth, 0, 0.03, 0.01));
-      const hair = mesh(new THREE.ConeGeometry(0.05, 0.16, 8), std(0xd8d4c8, 0.9, 0), 0, -0.07, -0.01);
-      hair.rotation.x = Math.PI;
-      head.add(hair);
-      for (const s of [-1, 1]) {
-        const horn = mesh(new THREE.ConeGeometry(0.012, 0.09, 5), std(0xd8ccb0, 0.6, 0), s * 0.04, 0.06, -0.01);
-        horn.rotation.z = -s * 0.5;
-        head.add(horn);
-      }
-      props.cane = blade(0.5, 0.02, 0.02, std(0x3a2a1a, 0.8, 0.1));
-      armR.hand.add(props.cane);
-      props.hammer = new THREE.Group();
-      props.hammer.add(blade(0.35, 0.015, 0.015, glow(0xffd36a, 1.8)));
-      props.hammer.add(mesh(new THREE.BoxGeometry(0.12, 0.1, 0.1), glow(0xffc84a, 2.2), 0, 0, -0.35));
-      props.hammer.visible = false;
-      armL.hand.add(props.hammer);
-      props.gblade = blade(0.6, 0.03, 0.01, glow(0xffe08a, 2));
-      props.gblade.visible = false;
-      armL.hand.add(props.gblade);
-      R.hunch = 0.35;
-      break;
-    }
-    case "beast": {
-      // Wolf-skull mask, spiky black fur; the black blade appears in phase 2.
-      const snout = mesh(new THREE.ConeGeometry(0.035, 0.1, 6), std(0xd8d0bc, 0.6, 0), 0, -0.005, -0.06);
-      snout.rotation.x = -Math.PI / 2;
-      head.add(snout);
-      for (const s of [-1, 1]) {
-        const ear = mesh(new THREE.ConeGeometry(0.015, 0.06, 4), M.dark, s * 0.03, 0.05, 0.0);
-        head.add(ear);
-        head.add(mesh(new THREE.SphereGeometry(0.008, 6, 4), glow(0xff3030, 3), s * 0.02, 0.01, -0.045));
-      }
-      for (let i = 0; i < 7; i += 1) {
-        const sp = mesh(new THREE.ConeGeometry(0.02, 0.09, 4), M.dark, (Math.random() - 0.5) * 0.06, 0.12 + i * 0.025, 0.07);
-        sp.rotation.x = 0.7;
-        torso.add(sp);
-      }
-      props.sword = blade(0.66, 0.075, 0.018, std(0x0a0a0c, 0.3, 0.6), glow(0xff1a1a, 2.4));
-      props.sword.visible = false;
-      armR.hand.add(props.sword);
-      R.beast = true;
-      break;
-    }
-    case "blood": {
-      // Crown of horns, robes, trident; blood wings in phase 2.
-      for (const s of [-1, 1]) {
-        const horn = mesh(new THREE.TorusGeometry(0.05, 0.01, 4, 8, Math.PI * 0.9), std(0x2a1a14, 0.6, 0.1), s * 0.03, 0.05, 0);
-        horn.rotation.set(0, Math.PI / 2, s * 0.6);
-        head.add(horn);
-      }
-      head.add(mesh(new THREE.SphereGeometry(0.01, 6, 4), glow(0xff2a2a, 3), -0.018, 0.01, -0.045));
-      head.add(mesh(new THREE.SphereGeometry(0.01, 6, 4), glow(0xff2a2a, 3), 0.018, 0.01, -0.045));
-      skirt.scale.set(1.4, 1.6, 1.4);
-      skirt.position.y = -0.2;
-      props.trident = new THREE.Group();
-      props.trident.add(blade(0.78, 0.02, 0.02, std(0x5a1010, 0.4, 0.6)));
-      for (const x of [-0.045, 0, 0.045]) props.trident.add(mesh(new THREE.ConeGeometry(0.014, 0.12, 4), glow(0xff3030, 1.8), x, 0, -0.82).rotateX(-Math.PI / 2));
-      props.trident.position.z = 0.25;
-      armR.hand.add(props.trident);
-      props.wings = new THREE.Group();
-      for (const s of [-1, 1]) {
-        const w = mesh(new THREE.PlaneGeometry(0.45, 0.32), std(0x4a0a10, 0.8, 0.1, { side: THREE.DoubleSide }), s * 0.26, 0.15, 0.12);
-        w.rotation.set(0.25, s * 0.45, s * 0.35);
-        props.wings.add(w);
-      }
-      props.wings.position.y = 0.18;
-      props.wings.visible = false;
-      torso.add(props.wings);
-      break;
-    }
-    default:
-  }
-  R.props = props;
-  root.userData.rig = R;
-  return root;
-}
+// Models live in boss-models.js.
+export { buildChampion };
 
 // ---------------------------------------------------------------------------
 // Animation
@@ -449,6 +224,9 @@ export function animateChampion(model, s, dt) {
       if (kind === "titan" || (kind === "beast" && !s.p2)) raise(armL, -2.3 + 1.6 * k, 0.7 - 1.5 * k);
     }
   }
+
+  animateCloth(R, performance.now() * 0.001, stride);
+  animateUndead(R, performance.now() * 0.001);
 
   // ---- per-champion props ----
   const P = R.props;
@@ -588,6 +366,15 @@ export class BossFx {
         .join("");
       this.status.classList.remove("hidden");
     } else this.status.classList.add("hidden");
+  }
+
+  /** One model of every champion (for shader precompilation). */
+  prewarmModels() {
+    return ["scarlet", "titan", "omen", "beast", "blood"].map((k) => {
+      const m = buildChampion(k);
+      m.position.set(0, -500, 0);
+      return m;
+    });
   }
 
   // ---------------- per frame ----------------
